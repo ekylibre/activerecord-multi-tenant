@@ -113,12 +113,66 @@ if defined?(ActiveRecord::Base)
   ActiveRecord::Base.extend(MultiTenant::ModelExtensionsClassMethods)
 end
 
-class ActiveRecord::Associations::Association
-  if ActiveRecord::VERSION::MAJOR > 4 || (ActiveRecord::VERSION::MAJOR == 4 && ActiveRecord::VERSION::MINOR >= 2)
-    alias skip_statement_cache_orig skip_statement_cache?
-    def skip_statement_cache?
-      return true if klass.respond_to?(:scoped_by_tenant?) && klass.scoped_by_tenant?
-      skip_statement_cache_orig
+module ActiveRecord::Associations
+  class Association
+    if ActiveRecord::VERSION::MAJOR > 4 || (ActiveRecord::VERSION::MAJOR == 4 && ActiveRecord::VERSION::MINOR >= 2)
+      alias skip_statement_cache_orig skip_statement_cache?
+      def skip_statement_cache?
+        return true if klass.respond_to?(:scoped_by_tenant?) && klass.scoped_by_tenant?
+        skip_statement_cache_orig
+      end
     end
   end
+
+  class AssociationScope
+    private
+
+      def last_chain_scope(scope, table, reflection, owner)
+        join_keys = reflection.join_keys
+        key = join_keys.key
+        foreign_key = join_keys.foreign_key
+
+        value = transform_value(owner[foreign_key])
+        scope = apply_scope(scope, table, key, value, owner)
+
+        if reflection.type
+          polymorphic_type = transform_value(owner.class.base_class.name)
+          scope = apply_scope(scope, table, reflection.type, polymorphic_type, owner)
+        end
+
+        scope
+      end
+
+      def next_chain_scope(scope, table, reflection, foreign_table, next_reflection)
+        join_keys = reflection.join_keys
+        key = join_keys.key
+        foreign_key = join_keys.foreign_key
+
+        constraint = table[key].eq(foreign_table[foreign_key])
+
+        if reflection.type
+          value = transform_value(next_reflection.klass.base_class.name)
+          scope = apply_scope(scope, table, reflection.type, value, reflection.owner)
+        end
+
+        scope.joins!(join(foreign_table, constraint))
+      end
+
+      def apply_scope(scope, table, key, value, owner=nil)
+        conditions = { key => value }
+        conditions = conditions.merge(tenant_enforcement_conditions(owner, scope.model))
+        if scope.table == table
+          scope.where!(conditions)
+        else
+          scope.where!(table.name => { key => value })
+        end
+      end
+
+      def tenant_enforcement_conditions(source, dest)
+        return {} unless source && [dest, source.class].all? { |m| m.respond_to?(:scoped_by_tenant?) && m.scoped_by_tenant? }
+        { dest.partition_key => source[source.class.partition_key] }
+      end
+  end
 end
+
+
