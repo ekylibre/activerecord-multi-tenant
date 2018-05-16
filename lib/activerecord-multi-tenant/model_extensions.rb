@@ -114,9 +114,11 @@ if defined?(ActiveRecord::Base)
 end
 
 class ActiveRecord::Associations::Association
-  alias skip_statement_cache_orig skip_statement_cache?
-  def skip_statement_cache?
-    return true if klass.respond_to?(:scoped_by_tenant?) && klass.scoped_by_tenant?
-    skip_statement_cache_orig
+  if ActiveRecord::VERSION::MAJOR > 4 || (ActiveRecord::VERSION::MAJOR == 4 && ActiveRecord::VERSION::MINOR >= 2)
+    alias skip_statement_cache_orig skip_statement_cache?
+    def skip_statement_cache?
+      return true if klass.respond_to?(:scoped_by_tenant?) && klass.scoped_by_tenant?
+      skip_statement_cache_orig
+    end
   end
 end
